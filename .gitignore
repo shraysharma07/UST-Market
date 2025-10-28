@@ -1,0 +1,13 @@
+venv/
+__pycache__/
+*.pyc
+.DS_Store
+# ignore raw market data
+OC_*.csv
+T_*.csv
+WU_*.csv
+TOB_*.csv
+DOB_*.csv
+!2_20180108_merged.csv
+!activity_per_minute.csv
+!event_type_distribution.csv
