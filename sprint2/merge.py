@@ -55,12 +55,11 @@ print("done ->", out_path)
 print(final["Source"].value_counts().to_dict())
 
 
-#Analysis section
+#Analysis section (for practice)
 #which minutes were busiest?
 #event type distribution
 
-combined["minute"] = combined["__ts"].dt.floor("min")  # rounds down to the nearest minute
-
+combined["minute"] = combined["__ts"].dt.floor("min") 
 activity_per_min = combined.groupby("minute").size()
 
 print("\nTop 5 busiest minutes:")
