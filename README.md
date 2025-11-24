@@ -1,33 +1,28 @@
-# UST-Market (October 28th 2025)
+python market@time.py
 
-# UST Market — 2-Year Treasury (2018-01-08)
+# Sprint 4 & 5 – Market Book at Time t
 
-This project merges and sorts U.S. Treasury 2-Year event data for January 8 2018.  
-It combines **Order Change (OC)**, **Trade (T)**, and **Work-Up (WU)** files into one chronologically ordered CSV using the tie-break rule **OC → WU → T**.
-
-## How to Run
-```bash
-python merge.py
-
-# Sprint 3 – Order Identification and Market Direction (November 5th 2025)
-
-This sprint analyzes market direction using order book data from `OC_2_20180108.csv`.
+This sprint rebuilds the **exchange-side order book** for the `2_YEAR` instrument at any given timestamp using `2_20180108_merged.csv`.
 
 ### How It Works
-- Reads raw order data.
-- Determines **side** (`B` = buy, `A` = sell).
-- Calculates:
-  - **Action** = ±Quantity  
-  - **PositionTaken** = Quantity × Premium (256ths)  
-  - **Cumulative Position** = running total  
-  - **Direction** = Up / Down / Flat (based on cumulative change)
+- Reads the merged market data file from Sprint 2.
+- Filters to:
+  - `Record Type = OB_CHANGE`
+  - `Instrument = 2_YEAR`
+- Processes messages in time/sequence order and:
+  - Uses **Ob Position** to rank book levels
+  - Applies **ADD** to insert/update levels
+  - Applies **DELETE** to remove levels
+- Builds separate **Buy** and **Sell** books and prints them at time **t**.
 
 ### Example Output
-| Seq | Action | Premium | PositionTaken | Cumulative | Side | Direction |
-|-----|---------|----------|----------------|-------------|------|------------|
-| 1 | +5 | 25552 | +127760 | +127760 | B | Up |
-| 6 | -5 | 25562 | -127810 | +383150 | A | Down |
+```text
+python market@time.py 02:01:23:187164
 
-### Run
-```bash
-python sprint3_generate_positions.py
+print_order_book_at(t=02:01:23:187164):
+Buy            Sell
+5@25552        5@25562
+5@25550        5@25564
+5@25548        5@25566
+5@25546        5@25568
+5@25544
