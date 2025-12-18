@@ -1,41 +1,44 @@
-# Sprint 6 – Testing and Measuring Market Book at Time t
+# Order Book Replay (Sprint 7–10)
 
-This sprint adds unit testing and performance measurement to the order book reconstruction logic built in Sprints 4 and 5. The purpose is to ensure that `print_order_book_at(t)` produces the correct order book snapshot and executes within an acceptable performance window.
+This project implements a replayable exchange-style order book using **OB_CHANGE** messages from U.S. Treasury market data.  The program reads a CSV file, filters by a single instrument (default: `2_YEAR`), and applies order-book updates sequentially, allowing the user to move forward and backward through time.
 
-## Overview
+The focus of this project is correctness and transparency: each order book change can be inspected, replayed, and reasoned about.
 
-- Uses the merged dataset `2_20180108_merged.csv`
-- Calls `print_order_book_at(t)` to print the buy and sell books at a timestamp
-- Adds tests to validate:
-  - Correct return type
-  - Required keys ("best_bid", "best_ask")
-  - Stable, reproducible execution
-- Measures execution time using `time.perf_counter()`
-- Ensures the function completes in under 0.5 seconds
+---
 
-## Unit Tests Implemented
+## What this does (current implementation)
 
-### test_returns_dict
-Checks that the function returns a dictionary.
+- Loads a CSV containing order book change messages
+- Filters rows where:
+  - `Record Type == OB_CHANGE`
+  - `Instrument == selected instrument`
+- Sorts events by `Sequence`
+- Maintains a **Market-By-Order** order book with two sides:
+  - Bids (`B`)
+  - Asks (`A`)
+- Applies updates using `Ob Position`:
+  - **ADD** inserts an order at the given rank and shifts lower-ranked orders down
+  - **DELETE** reduces quantity or removes the order entirely, shifting orders up
+  - **ALTER** updates an existing order by removing and reinserting it at the new position
+- Provides an interactive terminal UI (ncurses):
+  - **↑** step forward one event
+  - **↓** step backward one event (implemented by rebuilding the book for correctness)
+  - **Esc** quit
+- Displays the top levels of the bid and ask book side by side
+- Includes a simple benchmark mode to time rebuilding the book
 
-### test_keys_exist
-Ensures the output includes "best_bid" and "best_ask".
+Backward navigation is implemented by rebuilding the order book up to the selected index. This approach is slower than maintaining an undo stack, but it guarantees correctness and keeps the logic simple.
 
-### test_performance
-Measures runtime and asserts that execution stays under 0.5 seconds.
+### What’s next (planned)
+- Replace rebuild-from-start backward navigation with an undo stack (faster ↓ stepping)
+- Add unit tests for ADD shifting, partial/full DELETE, and edge cases (missing IDs / position mismatches)
+- Add basic input validation + clearer error messages for malformed rows
+- Run timing comparisons (rebuild vs undo) and summarize results in the writeup/README
+- Optional later: port the same replay model to a React UI (book derived from `(rows, index)`)
 
-## Example Test Output
-=== ORDER BOOK @ 02:01:19 ===
+---
 
-BEST BIDS
-Sequence Premium (256ths) Quantity
-1 25552 5
-2 25550 5
-3 25548 5
-4 25546 5
-5 25544 5
+## How to run
+```bash
+python sprint7.py /Users/shray/UST_Market/sprint2/2_20180108_merged.csv
 
-BEST ASKS
-(no asks available at this timestamp)
-
-Elapsed: 0.0062s
