@@ -1,9 +1,6 @@
 # Order Book Replay (Sprint 7–10)
 
 This project implements a replayable exchange-style order book using **OB_CHANGE** messages from U.S. Treasury market data.  The program reads a CSV file, filters by a single instrument (default: `2_YEAR`), and applies order-book updates sequentially, allowing the user to move forward and backward through time.
-
-The focus of this project is correctness and transparency: each order book change can be inspected, replayed, and reasoned about.
-
 ---
 
 ## What this does (current implementation)
@@ -26,8 +23,6 @@ The focus of this project is correctness and transparency: each order book chang
   - **Esc** quit
 - Displays the top levels of the bid and ask book side by side
 - Includes a simple benchmark mode to time rebuilding the book
-
-Backward navigation is implemented by rebuilding the order book up to the selected index. This approach is slower than maintaining an undo stack, but it guarantees correctness and keeps the logic simple.
 
 ### What’s next (planned)
 - Replace rebuild-from-start backward navigation with an undo stack (faster ↓ stepping)
