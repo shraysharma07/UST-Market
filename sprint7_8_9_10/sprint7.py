@@ -1,7 +1,11 @@
+# sprint7.py
+
 import csv
 import curses
 import sys
 import time
+
+from book import Book
 
 COL_TS = "Timestamp"
 COL_RT = "Record Type"
@@ -33,86 +37,25 @@ def load_changes(path, instrument):
             if row[COL_INST] != instrument:
                 continue
 
-            pos_raw = row[COL_POS].strip()
+            pos_raw = (row.get(COL_POS) or "").strip()
             if pos_raw == "":
                 continue
 
-            out.append({
-                "ts": row[COL_TS],
-                "pos": int(float(pos_raw)),
-                "qdiff": int(float(row[COL_QDIFF])),
-                "cmd": row[COL_CMD].strip().upper(),
-                "oid": row[COL_ID],
-                "px": int(float(row[COL_PX])),
-                "side": row[COL_SIDE].strip().upper(),
-                "seq": int(float(row[COL_SEQ])),
-            })
+            out.append(
+                {
+                    "ts": row[COL_TS],
+                    "pos": int(float(pos_raw)),
+                    "qdiff": int(float(row[COL_QDIFF])),
+                    "cmd": row[COL_CMD].strip().upper(),
+                    "oid": row[COL_ID],
+                    "px": int(float(row[COL_PX])),
+                    "side": row[COL_SIDE].strip().upper(),
+                    "seq": int(float(row[COL_SEQ])),
+                }
+            )
 
         out.sort(key=lambda x: x["seq"])
         return out
-
-
-class Book:
-    def __init__(self):
-        self.bids = []
-        self.asks = []
-
-    def _lst(self, side):
-        if side == "B":
-            return self.bids
-        if side == "A":
-            return self.asks
-        raise ValueError("bad side: " + repr(side))
-
-    def _find_id(self, lst, oid):
-        for i, o in enumerate(lst):
-            if o["oid"] == oid:
-                return i
-        return None
-
-    def apply(self, ch):
-        lst = self._lst(ch["side"])
-        cmd = ch["cmd"]
-        pos0 = max(0, ch["pos"] - 1)
-        q = abs(ch["qdiff"])
-
-        if cmd in ("ADD", "ALTER"):
-            old = self._find_id(lst, ch["oid"])
-            if old is not None:
-                lst.pop(old)
-                if old < pos0:
-                    pos0 = max(0, pos0 - 1)
-
-            o = {"oid": ch["oid"], "ts": ch["ts"], "px": ch["px"], "qty": q, "seq": ch["seq"]}
-
-            if pos0 >= len(lst):
-                lst.append(o)
-            else:
-                lst.insert(pos0, o)
-            return
-
-        if cmd == "DELETE":
-            idx = self._find_id(lst, ch["oid"])
-            if idx is None:
-                if 0 <= pos0 < len(lst):
-                    idx = pos0
-                else:
-                    return
-
-            cur = lst[idx]
-            new_qty = cur["qty"] - q
-            if new_qty > 0:
-                cur["qty"] = new_qty
-                cur["ts"] = ch["ts"]
-                cur["seq"] = ch["seq"]
-            else:
-                lst.pop(idx)
-            return
-
-        raise ValueError("unknown cmd: " + repr(cmd))
-
-    def top(self, depth):
-        return self.bids[:depth], self.asks[:depth]
 
 
 def build_book(changes, upto):
@@ -127,10 +70,11 @@ def draw(stdscr, changes, idx, instrument, depth):
     h, w = stdscr.getmaxyx()
 
     header = f"OB replay ({instrument})  idx={idx}/{len(changes)}   ↑ next  ↓ prev  ESC quit"
-    stdscr.addstr(0, 0, header[:w - 1])
+    stdscr.addstr(0, 0, header[: w - 1])
 
     b = build_book(changes, idx)
-    bids, asks = b.top(depth)
+    bids = b.bids[:depth]
+    asks = b.asks[:depth]
 
     stdscr.addstr(2, 0, "BID (Buy)                         | ASK (Sell)")
     stdscr.addstr(3, 0, "pos  qty   px     id tail         | pos  px     qty   id tail")
@@ -148,7 +92,7 @@ def draw(stdscr, changes, idx, instrument, depth):
             o = asks[i]
             right = f"{i+1:<4}{o['px']:<7}{o['qty']:<6}{o['oid'][-8:]:<10}"
 
-        stdscr.addstr(5 + i, 0, f"{left:<32}| {right}"[:w - 1])
+        stdscr.addstr(5 + i, 0, f"{left:<32}| {right}"[: w - 1])
 
     if idx > 0:
         c = changes[idx - 1]
@@ -156,7 +100,7 @@ def draw(stdscr, changes, idx, instrument, depth):
             f"last: seq={c['seq']} ts={c['ts']} cmd={c['cmd']} side={c['side']} "
             f"pos={c['pos']} px={c['px']} qdiff={c['qdiff']} id={c['oid']}"
         )
-        stdscr.addstr(min(h - 1, 5 + depth + 2), 0, footer[:w - 1])
+        stdscr.addstr(min(h - 1, 5 + depth + 2), 0, footer[: w - 1])
 
     stdscr.refresh()
 
@@ -167,6 +111,7 @@ def run_ui(path, instrument, depth):
     def _main(stdscr):
         curses.curs_set(0)
         stdscr.nodelay(False)
+        stdscr.keypad(True)
 
         idx = 0
         while True:
