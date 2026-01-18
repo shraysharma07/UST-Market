@@ -3,6 +3,7 @@ class Book:
         self.bids = []
         self.asks = []
 
+
     def _side(self, s):
         if s == "B":
             return self.bids
@@ -57,6 +58,11 @@ class Book:
             return
 
         raise ValueError("unknown cmd")
+
+    def best_bid_ask(self):
+        best_bid = self.bids[0]["px"] if self.bids else None
+        best_ask = self.asks[0]["px"] if self.asks else None
+        return best_bid, best_ask
 
     def snapshot(self):
         return (

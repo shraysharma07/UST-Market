@@ -1,4 +1,7 @@
-from book import Book
+try:
+    from .book import Book
+except ImportError:
+    from book import Book
 
 def ch(cmd, side, pos, oid, px=100, q=5, seq=1):
     return {

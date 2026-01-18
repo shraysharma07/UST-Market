@@ -2,10 +2,14 @@
 
 import csv
 import curses
+import os
 import sys
 import time
 
-from book import Book
+try:
+    from .book import Book
+except ImportError:
+    from book import Book
 
 COL_TS = "Timestamp"
 COL_RT = "Record Type"
@@ -19,16 +23,31 @@ COL_SIDE = "Bid/Ask"
 COL_SEQ = "Sequence"
 
 
-def load_changes(path, instrument):
+def find_default_csv():
+    paths = [
+        os.environ.get("CSV_PATH"),
+        "2_20180108_merged.csv",
+        os.path.join("sprint2", "2_20180108_merged.csv"),
+        os.path.join("..", "sprint2", "2_20180108_merged.csv"),
+    ]
+    for p in paths:
+        if p and os.path.exists(p):
+            return p
+    return None
+
+
+def load_changes(path, instrument=None):
+    if instrument is None:
+        instrument = "2_YEAR"
     with open(path, "r", newline="") as f:
         r = csv.DictReader(f)
         if not r.fieldnames:
             raise ValueError("missing header")
 
-        need = [COL_TS, COL_RT, COL_INST, COL_POS, COL_QDIFF, COL_CMD, COL_ID, COL_PX, COL_SIDE, COL_SEQ]
-        missing = [c for c in need if c not in r.fieldnames]
+        critical = [COL_RT, COL_INST, COL_POS, COL_QDIFF, COL_CMD, COL_ID, COL_PX, COL_SIDE, COL_SEQ]
+        missing = [c for c in critical if c not in r.fieldnames]
         if missing:
-            raise ValueError("missing columns: " + ", ".join(missing))
+            raise ValueError("missing critical columns: " + ", ".join(missing))
 
         out = []
         for row in r:
@@ -43,7 +62,7 @@ def load_changes(path, instrument):
 
             out.append(
                 {
-                    "ts": row[COL_TS],
+                    "ts": row.get(COL_TS, ""),
                     "pos": int(float(pos_raw)),
                     "qdiff": int(float(row[COL_QDIFF])),
                     "cmd": row[COL_CMD].strip().upper(),
@@ -105,7 +124,11 @@ def draw(stdscr, changes, idx, instrument, depth):
     stdscr.refresh()
 
 
-def run_ui(path, instrument, depth):
+def run_ui(path=None, instrument=None, depth=12):
+    if path is None:
+        path = find_default_csv()
+    if instrument is None:
+        instrument = "2_YEAR"
     changes = load_changes(path, instrument)
 
     def _main(stdscr):
@@ -130,7 +153,11 @@ def run_ui(path, instrument, depth):
     curses.wrapper(_main)
 
 
-def bench(path, instrument, n):
+def bench(path=None, instrument=None, n=5000):
+    if path is None:
+        path = find_default_csv()
+    if instrument is None:
+        instrument = "2_YEAR"
     changes = load_changes(path, instrument)
     upto = min(n, len(changes))
     t0 = time.perf_counter()
@@ -145,39 +172,145 @@ def usage():
     print("  python sprint7.py --bench path.csv [N] [--instrument 2_YEAR]")
 
 
+def pv_cash_flows(years=2, coupon_rate=0.04, face=100, freq=2):
+    periods = int(years * freq)
+    coupon = (coupon_rate / freq) * face
+    flows = [coupon] * periods
+    flows[-1] += face
+    return flows
+
+
+def present_value(cash_flows, ytm, freq=2):
+    period_rate = ytm / freq
+    pv = 0.0
+    for i, cf in enumerate(cash_flows):
+        pv += cf / ((1.0 + period_rate) ** (i + 1))
+    return pv
+
+
+def price_from_ytm(ytm, years=2, coupon_rate=0.04, face=100, freq=2):
+    flows = pv_cash_flows(years, coupon_rate, face, freq)
+    return present_value(flows, ytm, freq)
+
+
+def solve_ytm(market_price, years=2, coupon_rate=0.04, face=100, freq=2):
+    low, high = -0.5, 1.0
+    while high - low > 1e-10:
+        mid = (low + high) / 2
+        price = price_from_ytm(mid, years, coupon_rate, face, freq)
+        diff = price - market_price
+        if abs(diff) < 1e-8:
+            return mid
+        if diff > 0:
+            low = mid
+        else:
+            high = mid
+    return (low + high) / 2
+
+
+def premium_to_price(premium_256ths):
+    return premium_256ths / 256.0
+
+
+def calc_pv_at_intervals(changes, interval_minutes=10):
+    results = []
+    b = Book()
+    last_time = None
+
+    for idx, ch in enumerate(changes):
+        b.apply(ch)
+        ts_str = ch.get("ts", "")
+        if not ts_str:
+            continue
+
+        try:
+            ts_clean = ts_str.split(".")[0].strip()
+            if "T" in ts_clean:
+                ts_clean = ts_clean.replace("T", " ")
+            time_tuple = time.strptime(ts_clean, "%Y-%m-%d %H:%M:%S")
+            current_time = time.mktime(time_tuple)
+        except:
+            continue
+
+        if last_time is None:
+            last_time = current_time
+
+        elapsed_minutes = (current_time - last_time) / 60.0
+        if elapsed_minutes >= interval_minutes:
+            best_bid, best_ask = b.best_bid_ask()
+            mid = None
+            if best_bid is not None and best_ask is not None:
+                mid = (premium_to_price(best_bid) + premium_to_price(best_ask)) / 2.0
+            elif best_bid is not None:
+                mid = premium_to_price(best_bid)
+            elif best_ask is not None:
+                mid = premium_to_price(best_ask)
+
+            if mid is not None:
+                ytm = solve_ytm(mid)
+                flows = pv_cash_flows()
+                pv = present_value(flows, ytm)
+                results.append({"ts": ts_str, "mid": mid, "ytm": ytm, "pv": pv})
+            last_time = current_time
+
+    return results
+
+
 if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        usage()
-        sys.exit(1)
-
-    instrument = "2_YEAR"
+    instrument = None
     depth = 12
+    path = None
 
-    if sys.argv[1] == "--bench":
-        if len(sys.argv) < 3:
+    if "--bench" in sys.argv:
+        arg_idx = sys.argv.index("--bench")
+        if arg_idx + 1 < len(sys.argv) and not sys.argv[arg_idx + 1].startswith("--"):
+            path = sys.argv[arg_idx + 1]
+        if path is None:
+            path = find_default_csv()
+        if path is None:
             usage()
             sys.exit(1)
 
-        path = sys.argv[2]
         n = 5000
-        if len(sys.argv) >= 4 and sys.argv[3].isdigit():
-            n = int(sys.argv[3])
+        if arg_idx + 2 < len(sys.argv) and sys.argv[arg_idx + 2].isdigit():
+            n = int(sys.argv[arg_idx + 2])
 
         if "--instrument" in sys.argv:
             i = sys.argv.index("--instrument")
-            instrument = sys.argv[i + 1]
+            if i + 1 < len(sys.argv):
+                instrument = sys.argv[i + 1]
 
         bench(path, instrument, n)
         sys.exit(0)
 
-    path = sys.argv[1]
+    if len(sys.argv) >= 2 and not sys.argv[1].startswith("--"):
+        path = sys.argv[1]
+
+    if path is None:
+        path = find_default_csv()
 
     if "--instrument" in sys.argv:
         i = sys.argv.index("--instrument")
-        instrument = sys.argv[i + 1]
+        if i + 1 < len(sys.argv):
+            instrument = sys.argv[i + 1]
 
     if "--depth" in sys.argv:
         i = sys.argv.index("--depth")
-        depth = int(sys.argv[i + 1])
+        if i + 1 < len(sys.argv):
+            depth = int(sys.argv[i + 1])
+
+    if "--interval-minutes" in sys.argv:
+        i = sys.argv.index("--interval-minutes")
+        if i + 1 < len(sys.argv):
+            interval = int(sys.argv[i + 1])
+            changes = load_changes(path, instrument)
+            results = calc_pv_at_intervals(changes, interval)
+            for r in results:
+                print(f"{r['ts']} mid={r['mid']:.4f} ytm={r['ytm']:.6f} pv={r['pv']:.4f}")
+            sys.exit(0)
+
+    if path is None:
+        usage()
+        sys.exit(1)
 
     run_ui(path, instrument, depth)
