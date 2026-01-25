@@ -1,73 +1,129 @@
-# Order Book Replay (Sprint 7–10)
+# Order Book Replay and Fixed Income Calculator
 
-This project implements a replayable exchange-style order book using **OB_CHANGE** messages from U.S. Treasury market data. The program reads a CSV file, filters by a single instrument (default: `2_YEAR`), and applies order-book updates sequentially, allowing the user to move forward and backward through time.
+This project replays historical order book data and calculates present values for Treasury bonds.
 
-The project is structured as incremental sprints. Sprint 7 establishes the replay engine and UI, while Sprint 8 focuses on correctness, validation, and testability.
+## Table of Contents
 
----
+- [Project Structure](#project-structure)
+- [Installation](#installation)
+- [Order Book Module](#order-book-module)
+- [Fixed Income Calculator](#fixed-income-calculator)
+- [Usage](#usage)
+- [Testing](#testing)
 
-## Sprint 7 – Order Book Replay Engine
+## Project Structure
+```
+project/
+├── README.md
+├── sprint7.py
+├── orderbook/
+│   ├── __init__.py
+│   └── book.py
+├── test_book.py
+└── test_pv.py
+```
 
-### What Sprint 7 Does
-- Loads a CSV containing order book change messages
-- Filters rows where:
-  - `Record Type == OB_CHANGE`
-  - `Instrument == selected instrument`
-- Sorts events by `Sequence`
-- Maintains a Market-By-Order order book with two sides:
-  - Bids (`B`)
-  - Asks (`A`)
-- Applies updates using `Ob Position` as the exchange rank:
-  - `ADD` inserts an order at the given position and shifts lower-ranked orders
-  - `DELETE` reduces quantity or removes the order entirely
-  - `ALTER` removes an existing order and reinserts it at the new position
-- Provides an interactive terminal UI (ncurses):
-  - ↑ step forward one event
-  - ↓ step backward one event (implemented by rebuilding the book for correctness)
-  - Esc quits
-- Displays the top levels of the bid and ask book side-by-side
-- Includes a benchmark mode to time rebuilding the book
+| File | Description |
+|------|-------------|
+| sprint7.py | Main module with replay and calculator classes |
+| orderbook/book.py | Book class for order book state |
+| orderbook/__init__.py | Package exports |
+| test_book.py | Tests for the Book class |
+| test_pv.py | Tests for present value calculations |
 
-Sprint 7 prioritizes correctness and clarity over performance, especially for backward navigation.
+## Installation
 
----
+Python 3.7 or newer is required. No external packages are needed.
 
-## Sprint 8 – Correctness and Validation
-
-Sprint 8 focuses on verifying that the replay logic behaves correctly across common and edge cases.
-
-### What Sprint 8 Adds
-- Refactors core order book logic into a standalone `Book` module
-- Introduces unit tests to validate book behavior
-- Removes unsafe fallback behavior when DELETE references a missing order
-- Makes order identity strictly dependent on `Order Number`
-- Preserves the Market-By-Order model and Sprint 7 UI without changes
-
-### Unit Tests
-Sprint 8 adds deterministic unit tests using small synthetic change sequences rather than full CSV files. This allows correctness to be tested independently of input size or data quality.
-
-## Questions and Clarifications
-
-The following questions identify specification ambiguities that materially affect correctness rather than implementation style. Different answers to these questions lead to meaningfully different order book behavior.
-
-### Core Ordering Semantics
-- Is the expected behavior to recompute price–time priority from price and arrival information, or to treat `Ob Position` as the authoritative exchange rank and replay it directly?
-- When multiple orders share the same price level, which field should define time priority (`Sequence` or `Timestamp`)?
-
-### Order Identity and DELETE Behavior
-- Should DELETE events always be matched strictly by `Order Number`?
-- If a DELETE references a missing or unknown order ID, should the update be ignored, raise an error, or attempt recovery?
-
-### ALTER Semantics
-- Does an ALTER operation reset an order’s time priority, or should the original arrival ordering be preserved when position or quantity changes?
-
-
-#### Covered Cases
-- `ADD` correctly inserts orders and shifts existing ones
-- Partial `DELETE` reduces quantity without removing the order
-- Full `DELETE` removes the order entirely
-- `ALTER` repositions an order correctly within the book
-
-Run tests with:
+On Windows, install windows-curses for the terminal UI:
 ```bash
-pytest test_book.py
+pip install windows-curses
+```
+
+## Order Book Module
+
+The Book class maintains order book state. It has two lists: bids (buy orders) and asks (sell orders). The class processes ADD, ALTER, and DELETE events.
+```python
+from orderbook import Book
+
+book = Book()
+book.apply({
+    "cmd": "ADD",
+    "side": "B",
+    "pos": 1,
+    "oid": "order1",
+    "px": 25600,
+    "qdiff": 100,
+    "seq": 1,
+    "ts": ""
+})
+
+bid, ask = book.best_bid_ask()
+```
+
+## Fixed Income Calculator
+
+The FixedIncomeCalculator class handles bond math. It calculates prices from yields, solves for yields from prices, and computes present values.
+
+A bond pays coupon payments plus face value at maturity. Present value is what those future payments are worth today, discounted by the yield. Price and yield move in opposite directions.
+```python
+from sprint7 import FixedIncomeCalculator
+
+calc = FixedIncomeCalculator(years=2, coupon_rate=0.04, face=100, freq=2)
+
+# Get cash flows
+flows = calc.cash_flows()  # [2.0, 2.0, 2.0, 102.0]
+
+# Price from yield
+price = calc.price_from_ytm(0.045)  # ~99.14
+
+# Yield from price
+ytm = calc.solve_ytm(99.14)  # ~0.045
+```
+
+## Usage
+
+### Terminal UI
+
+Step through order book history:
+```bash
+python sprint7.py 2_20180108_merged.csv
+```
+
+Controls:
+- UP arrow: step forward
+- DOWN arrow: step backward
+- ESC: exit
+
+### Calculate PV at Intervals
+```bash
+python sprint7.py 2_20180108_merged.csv --interval-minutes 10
+```
+
+### Benchmark
+```bash
+python sprint7.py --bench 10000
+```
+
+### Options
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| --instrument NAME | Instrument to track | 2_YEAR |
+| --depth N | Book levels to display | 12 |
+| --interval-minutes N | PV calculation interval | - |
+| --bench N | Benchmark N changes | 5000 |
+
+## Testing
+
+Run the tests:
+```bash
+python test_book.py
+python test_pv.py
+```
+
+All tests should pass.
+
+## Author
+
+Shray Sharma
